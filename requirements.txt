@@ -1,0 +1,3 @@
+# No third-party dependencies — Python standard library only.
+# Nothing to install via pip. This file exists so tools/pipelines
+# that expect a requirements.txt don't break.

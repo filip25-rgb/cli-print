@@ -1,0 +1,17 @@
+[project]
+name = "print-cli"
+version = "0.1.0"
+description = "Silent cross-platform CLI: print any file to any printer (Linux CUPS + Windows spooler, no GUI dialogs)"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "print-cli" }]
+
+[project.scripts]
+print-cli = "print_cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["print_cli"]
