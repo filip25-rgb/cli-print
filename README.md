@@ -30,25 +30,51 @@ Optional on Windows for extra-silent PDFs: `pip install pywin32`. Without it, pr
 
 ## Install — auto-installs what's missing
 
-`install.sh` / `install.bat` detect your distro and install Python + CUPS client if absent, then give you a `print-cli` command. Nothing else needed (stdlib-only).
+### Step 0 — get the code (fresh laptop)
 
 ```bash
-# Linux / macOS — fresh laptop? just run:
-bash install.sh --yes
-print-cli            # guided wizard (easiest)
+git clone https://github.com/filip25-rgb/cli-print.git
+cd cli-print
+```
 
-# Windows — double-click install.bat (uses winget for Python if missing)
+No git? Download the ZIP from GitHub and unzip, then `cd` into it.
+
+### Step 1 — run the installer
+
+```bash
+# Linux / macOS — installs python3 + cups-client if absent, then shims `print-cli`:
+bash install.sh --yes
+# flags: --yes = don't ask, --no-deps = skip system packages, shim only
+
+# Windows — double-click install.bat (installs Python via winget if missing):
 install.bat
 ```
 
-Manual equivalents if you prefer: `sudo apt install python3 cups-client`, macOS `brew install python3 cups`, Windows Python from [python.org](https://www.python.org/downloads/).
+### Step 2 — make `print-cli` visible (Linux/macOS)
 
-Check health anytime (verifies python, lp/lpstat, printers, default):
+The shim lives at `~/.local/bin/print-cli`. If your shell says `print-cli: command not found`, do once:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"   # then restart the terminal
+# fallback without PATH (always works):
+~/.local/bin/print-cli list
+python3 print_cli.py list
+```
+
+On Windows `install.bat` creates `print-cli.cmd` in this folder — either run `py print_cli.py ...` here, or add this folder to PATH (Settings > System > About > Advanced > Environment Variables), then `print-cli list`.
+
+### Step 3 — verify (any OS)
 
 ```bash
 print-cli doctor          # report + manual fix hints
 print-cli doctor --fix    # auto-install missing pieces (may ask for sudo)
+print-cli list            # you should see your printers
+print-cli                 # guided wizard (easiest first print)
 ```
+
+No installer needed if you prefer: `python3 print_cli.py ...` (Linux/macOS) or `py print_cli.py ...` (Windows) works directly — stdlib-only, zero pip packages. Optional full package install: `pipx install .` (needs `sudo apt install pipx python3-venv` on Ubuntu 24.04).
+
+Manual equivalents: `sudo apt install python3 cups-client`, macOS `brew install python3 cups`, Windows Python from [python.org](https://www.python.org/downloads/).
 
 ---
 
@@ -116,8 +142,9 @@ README.md
 
 ## Troubleshooting
 
-- `command not found: lpstat` (Linux) → `sudo apt install cups-client`
-- `externally-managed-environment` on `pip install` (Ubuntu 24.04) → don't fight it: use **Option 0 / A** (no pip needed), or `pipx install .`
+- `print-cli: command not found` → PATH step missed: `export PATH="$HOME/.local/bin:$PATH"`, restart terminal, or use `~/.local/bin/print-cli` / `python3 print_cli.py` directly
+- `command not found: lpstat` (Linux) → `bash install.sh --yes`, or manually `sudo apt install cups-client` (dnf/pacman/zypper equivalents in `install.sh`)
+- `externally-managed-environment` on `pip install` (Ubuntu 24.04) → don't fight it: no pip needed — use `python3 print_cli.py` or the shim; only for package installs use `pipx install .`
 - `No printers found` → check CUPS (`lpstat -p`) on Linux, `Get-Printer` in PowerShell on Windows; USB/network printer must be added at OS level first
 - Windows prints via wrong app → change the file extension's default app in Settings; `print-cli` uses that handler silently
 - Nothing prints, no error → run `print-cli queue` to see if the job is held, and `print-cli print ... --dry-run` to inspect the exact spool command
