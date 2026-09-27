@@ -64,7 +64,7 @@ print-cli list --json
 
 # print anything (PDF, txt, md, png, jpg, ...) — no popup
 print-cli print document.pdf
-print-cli print document.pdf -p HP_Smart_Tank_5100_series_D43B40
+print-cli print document.pdf -p MyPrinter
 print-cli print notes.txt -p hp_smart_printing -n 2 --job-name "my-job"
 
 # CUPS options (Linux/macOS only, repeatable)
