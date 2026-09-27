@@ -28,61 +28,37 @@ Optional on Windows for extra-silent PDFs: `pip install pywin32`. Without it, pr
 
 ---
 
-## Install (pick one — easiest first)
+## Install — auto-installs what's missing
 
-### Option 0 — No install, just run (recommended)
-
-```bash
-# Linux / macOS
-python3 print_cli.py --help
-python3 print_cli.py list
-
-# Windows
-py print_cli.py --help
-py print_cli.py list
-```
-
-That's it. Single file, no dependencies.
-
-### Option A — One-command shim (`install.sh` / `install.bat`)
-
-Gives you a real `print-cli` command without venv/pip headaches:
+`install.sh` / `install.bat` detect your distro and install Python + CUPS client if absent, then give you a `print-cli` command. Nothing else needed (stdlib-only).
 
 ```bash
-# Linux / macOS
-bash install.sh
-print-cli list
+# Linux / macOS — fresh laptop? just run:
+bash install.sh --yes
+print-cli            # guided wizard (easiest)
 
-# Windows: double-click install.bat, or:
+# Windows — double-click install.bat (uses winget for Python if missing)
 install.bat
-print-cli list   # after adding this folder to PATH
 ```
 
-What it does: `chmod +x`, then drops a tiny shim (`~/.local/bin/print-cli` on Unix, `print-cli.cmd` on Windows) that calls `python3 print_cli.py`. No virtualenv, no packages.
+Manual equivalents if you prefer: `sudo apt install python3 cups-client`, macOS `brew install python3 cups`, Windows Python from [python.org](https://www.python.org/downloads/).
 
-### Option B — Proper package install (optional)
-
-Only if you want the `print-cli` entry-point via `pyproject.toml`:
+Check health anytime (verifies python, lp/lpstat, printers, default):
 
 ```bash
-# Preferred on modern Linux (handles PEP 668 externally-managed-env):
-sudo apt install pipx python3-venv
-pipx install .
-
-# Or classic venv:
-python3 -m venv .venv
-.venv/bin/pip install -e .
-.venv/bin/print-cli --help
+print-cli doctor          # report + manual fix hints
+print-cli doctor --fix    # auto-install missing pieces (may ask for sudo)
 ```
-
-`requirements.txt` is intentionally empty — there is nothing to install.
 
 ---
 
-## Usage
+## Usage — easiest first
 
 ```bash
-# list printers (* = default)
+# 1) guided wizard: pick file -> pick printer -> copies -> done (no popups)
+print-cli
+
+# 2) direct commands
 print-cli list
 print-cli list --json
 

@@ -1,37 +1,49 @@
 @echo off
-REM Easy installer for print-cli (Windows).
-REM Needs only: Python 3.9+ from https://www.python.org/downloads/
-REM Zero pip dependencies — print_cli.py is stdlib-only.
-REM Usage: double-click or run `install.bat` in this folder.
+REM print-cli installer (Windows) — installs everything that's missing.
+REM Usage: install.bat [--yes]
+REM Needs internet for winget/pip steps. Zero mandatory pip deps.
+
+setlocal
+set YES=0
+if "%1"=="--yes" set YES=1
 
 where py >nul 2>nul
-if %errorlevel%==0 (
-  set PY=py
-) else (
-  set PY=python
-)
+if %errorlevel%==0 ( set PY=py ) else ( set PY=python )
 
-%PY% --version
+%PY% --version >nul 2>nul
 if %errorlevel% neq 0 (
-  echo ERROR: Python not found. Install from https://www.python.org/downloads/ ^(tick "Add python to PATH"^).
-  pause
-  exit /b 1
+  echo Python not found.
+  where winget >nul 2>nul
+  if %errorlevel%==0 (
+    if "%YES%"=="1" ( set C= Y ) else ( set /p C="Install Python via winget now? [Y/n] " )
+    if /i not "%C%"=="n" (
+      winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements
+      where py >nul 2>nul
+      if %errorlevel%==0 ( set PY=py ) else ( set PY=python )
+    )
+  ) else (
+    echo Install Python 3.9+ from https://www.python.org/downloads/ ^(tick "Add python to PATH"^) then re-run.
+    pause
+    exit /b 1
+  )
+)
+%PY% --version || ( echo ERROR: Python still missing. & pause & exit /b 1 )
+
+%PY% "%~dp0print_cli.py" doctor
+if %errorlevel% neq 0 (
+  echo --- attempting auto-fix ^(optional pywin32^) ---
+  %PY% "%~dp0print_cli.py" doctor --fix
 )
 
-%PY% "%~dp0print_cli.py" --help
-if %errorlevel% neq 0 exit /b 1
-
-REM Create a print-cli.cmd shim next to this script so `print-cli` works
-REM when this folder is on PATH.
+REM Shim so `print-cli` works when this folder is on PATH
 (
   echo @echo off
   echo %PY% "%~dp0print_cli.py" %%*
 ) > "%~dp0print-cli.cmd"
 
 echo.
-echo OK: run with: %PY% "%~dp0print_cli.py" list
-echo Or add this folder to PATH, then use: print-cli list
-echo.
-echo Optional ^(better isolation^): pipx install .
-echo Optional silent PDFs: %%PY%% -m pip install pywin32
+echo Installed: %~dp0print-cli.cmd
+echo Easiest:  %PY% "%~dp0print_cli.py"   ^(guided wizard^)
+echo Or add this folder to PATH, then:  print-cli list
+echo Optional quieter PDFs: %PY% -m pip install pywin32
 pause

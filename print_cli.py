@@ -7,12 +7,14 @@ straight to the OS spooler (CUPS `lp` on Unix, PowerShell spooler on
 Windows), so it stays silent/headless when possible.
 
 Usage:
-    print-cli list [--json]
+    print-cli                       # guided wizard (easiest: pick file + printer)
     print-cli print FILE [-p PRINTER] [-n COPIES] [-o OPTS] [--job-name NAME] [--dry-run]
+    print-cli list [--json]
     print-cli queue [-p PRINTER]
     print-cli cancel JOB_ID [-p PRINTER]
     print-cli cancel-all [-p PRINTER]
     print-cli default [PRINTER_NAME]
+    print-cli doctor [--fix]        # check + auto-install what's missing
 """
 from __future__ import annotations
 
@@ -61,6 +63,215 @@ def is_windows() -> bool:
 
 def is_unix_cups() -> bool:
     return SYSTEM in ("Linux", "Darwin")
+
+
+# ------------------------------------------------- doctor / auto-install
+
+def _pkg_manager() -> list[str] | None:
+    """Return install command prefix for CUPS client, e.g. ['sudo','apt','install','-y']."""
+    if SYSTEM == "Darwin":
+        if shutil.which("brew"):
+            return ["brew", "install"]
+        return None
+    if SYSTEM != "Linux":
+        return None
+    if shutil.which("apt"):
+        return ["sudo", "apt", "install", "-y"]
+    if shutil.which("dnf"):
+        return ["sudo", "dnf", "install", "-y"]
+    if shutil.which("pacman"):
+        return ["sudo", "pacman", "-S", "--noconfirm"]
+    if shutil.which("zypper"):
+        return ["sudo", "zypper", "install", "-y"]
+    if shutil.which("apk"):
+        return ["sudo", "apk", "add"]
+    return None
+
+
+def doctor_report() -> tuple[list[tuple[str, bool, str]], list[str]]:
+    """Return ([(name, ok, detail)], fix_hints). Pure check, no changes."""
+    checks: list[tuple[str, bool, str]] = []
+    hints: list[str] = []
+
+    ok_py = sys.version_info >= (3, 9)
+    checks.append(("python>=3.9", ok_py, platform.python_version()))
+    if not ok_py:
+        hints.append("Install Python 3.9+: Ubuntu `sudo apt install python3`, "
+                     "macOS `brew install python3`, Windows https://www.python.org/downloads/")
+
+    if is_unix_cups():
+        for tool in ("lpstat", "lp", "lpoptions"):
+            found = shutil.which(tool) is not None
+            checks.append((tool, found, shutil.which(tool) or "missing"))
+        if not shutil.which("lpstat"):
+            mgr = _pkg_manager()
+            if mgr:
+                hints.append(f"Install CUPS client: `{' '.join(mgr)} cups-client`"
+                             + (" `cups`" if SYSTEM == "Darwin" else ""))
+            else:
+                hints.append("Install your distro's cups-client package (provides lp/lpstat).")
+        try:
+            printers = cups_list_printers() if shutil.which("lpstat") else []
+        except SystemExit:
+            printers = []
+        checks.append(("printers-found", len(printers) > 0, f"{len(printers)} found"))
+        if not printers:
+            hints.append("No printers found: add one in OS Settings first, then re-run `print-cli doctor`.")
+        else:
+            d = cups_default_printer()
+            checks.append(("default-printer", d is not None, d or "none (use -p or `print-cli default NAME`)"))
+    elif is_windows():
+        pwsh = _pwsh()
+        checks.append(("powershell", pwsh is not None, pwsh or "missing"))
+        if not pwsh:
+            hints.append("PowerShell is built into Windows 10/11 — repair via Windows Update.")
+        try:
+            import win32print  # type: ignore  # noqa
+            checks.append(("pywin32 (optional)", True, "installed (most silent path)"))
+        except ImportError:
+            checks.append(("pywin32 (optional)", False, "not installed (PowerShell fallback still works, no dialog)"))
+            hints.append("Optional, quieter PDFs: `py -m pip install pywin32`.")
+        try:
+            printers = win_list_printers() if pwsh else []
+        except SystemExit:
+            printers = []
+        checks.append(("printers-found", len(printers) > 0, f"{len(printers)} found"))
+        if not printers:
+            hints.append("No printers found: add one in Settings > Printers first.")
+    else:
+        checks.append(("os", False, f"unsupported: {SYSTEM}"))
+        hints.append("Supported: Linux, Windows, macOS.")
+    return checks, hints
+
+
+def cmd_doctor(args) -> int:
+    checks, hints = doctor_report()
+    print(f"print-cli doctor — {SYSTEM} / Python {platform.python_version()}")
+    bad = 0
+    for name, ok, detail in checks:
+        print(f"  [{'OK ' if ok else 'FAIL'}] {name}: {detail}")
+        if not ok and "(optional)" not in name and name != "default-printer":
+            bad += 1
+    if bad == 0 and not hints:
+        print("\nAll good. Try: print-cli list")
+        return 0
+    if hints:
+        print("\nFixes:")
+        for h in hints:
+            print(f"  - {h}")
+    if getattr(args, "fix", False):
+        return cmd_fix()
+    if bad:
+        print("\nRe-run with --fix to auto-install what's possible: print-cli doctor --fix")
+        return 1
+    return 0
+
+
+def cmd_fix() -> int:
+    """Auto-install missing system deps. Returns 0 if everything now OK."""
+    print("Attempting auto-fix (may ask for sudo/admin)...")
+    if is_unix_cups():
+        if not shutil.which("lpstat"):
+            mgr = _pkg_manager()
+            if not mgr:
+                eprint("error: no supported package manager found (apt/dnf/pacman/zypper/apk/brew). "
+                       "Install cups-client manually.")
+                return 1
+            pkg = "cups" if SYSTEM == "Darwin" else "cups-client"
+            print(f"$ {' '.join(mgr)} {pkg}")
+            r = subprocess.run([*mgr, pkg])
+            if r.returncode != 0:
+                eprint("auto-install failed; try manually (see `print-cli doctor`).")
+                return r.returncode
+        # re-check
+        checks, _ = doctor_report()
+        hard_fail = [n for n, ok, _ in checks if not ok and "(optional)" not in n and n != "default-printer"]
+        if hard_fail:
+            eprint(f"still missing: {', '.join(hard_fail)}")
+            return 1
+        print("Fixed. Try: print-cli list")
+        return 0
+    if is_windows():
+        try:
+            import win32print  # type: ignore  # noqa
+            print("pywin32 already installed.")
+        except ImportError:
+            print("Installing optional pywin32 for the most silent path...")
+            r = subprocess.run([sys.executable, "-m", "pip", "install", "pywin32"])
+            if r.returncode != 0:
+                eprint("pywin32 install failed; PowerShell fallback still works (no dialog).")
+                return 0  # not fatal
+        print("Done. Try: print-cli list")
+        return 0
+    eprint(f"auto-fix not supported on {SYSTEM}.")
+    return 1
+
+
+# ------------------------------------------------------------------ wizard
+
+def _prompt(msg: str, default: str | None = None) -> str:
+    suffix = f" [{default}]" if default else ""
+    try:
+        val = input(f"{msg}{suffix}: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        sys.exit(130)
+    return val or (default or "")
+
+
+def cmd_wizard(_args=None) -> int:
+    """Guided mode: pick file -> pick printer -> copies -> print. Easiest path."""
+    print("print-cli wizard — guided printing (no dialog windows pop up)\n")
+    # 1) deps first: offer auto-fix if broken
+    checks, _ = doctor_report()
+    hard_fail = [n for n, ok, _ in checks if not ok and "(optional)" not in n
+                 and n not in ("default-printer",)]
+    if hard_fail:
+        print(f"Missing: {', '.join(hard_fail)}")
+        if _prompt("Auto-install what's missing? (y/n)", "y").lower() in ("y", "yes"):
+            if cmd_fix() != 0:
+                return 1
+        else:
+            eprint("Run `print-cli doctor` for manual steps.")
+            return 1
+    # 2) file
+    while True:
+        f = _prompt("File to print (drag-drop or type path, e.g. doc.pdf)")
+        p = Path(f.strip().strip('"').strip("'")).expanduser()
+        if p.exists() and p.is_file():
+            break
+        eprint(f"  not found: {p} — try again.")
+    # 3) printer
+    printers = win_list_printers() if is_windows() else cups_list_printers()
+    if not printers:
+        eprint("No printers found. Add one in OS Settings, then retry.")
+        return 1
+    print("\nPrinters:")
+    for i, pr in enumerate(printers, 1):
+        star = " (default)" if pr.get("default") else ""
+        print(f"  {i}) {pr.get('name')}{star}")
+    default_idx = next((str(i) for i, pr in enumerate(printers, 1) if pr.get("default")), "1")
+    while True:
+        sel = _prompt(f"Pick printer [1-{len(printers)}]", default_idx)
+        if sel.isdigit() and 1 <= int(sel) <= len(printers):
+            printer = printers[int(sel) - 1]["name"]
+            break
+        # also accept a name directly
+        names = [pr["name"] for pr in printers]
+        if sel in names:
+            printer = sel
+            break
+        eprint("  invalid choice — enter the number or exact name.")
+    copies = _prompt("Copies", "1")
+    copies_n = int(copies) if copies.isdigit() and int(copies) >= 1 else 1
+    print(f'\nWill print "{p.name}" to "{printer}" x{copies_n} (silent, no popup).')
+    if _prompt("Print now? (y/n)", "y").lower() not in ("y", "yes"):
+        print("Cancelled. Preview with: "
+              f'print-cli print "{p}" -p "{printer}" -n {copies_n} --dry-run')
+        return 0
+    if is_windows():
+        return win_print(p, printer, copies_n, dry_run=False)
+    return cups_print(p, printer, copies_n, [], p.stem, dry_run=False)
 
 
 # ------------------------------------------------------- Linux/macOS (CUPS)
@@ -393,13 +604,22 @@ def build_parser() -> argparse.ArgumentParser:
                     "spools directly via CUPS (Linux/macOS) or the Windows spooler.",
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    sub = p.add_subparsers(dest="cmd", required=False)
+
+    s = sub.add_parser("wizard", help="Guided mode: pick file + printer step by step (easiest)")
+    s.set_defaults(cmd="wizard")
+
+    s = sub.add_parser("doctor", help="Check dependencies/printers and show (or --fix) install steps")
+    s.add_argument("--fix", action="store_true", help="Auto-install missing system packages (may ask for sudo)")
+
+    s = sub.add_parser("setup", help="Alias for 'doctor --fix'")
+    s.set_defaults(cmd="setup")
 
     s = sub.add_parser("list", aliases=["printers"], help="List available printers")
     s.add_argument("--json", action="store_true", help="Machine-readable JSON output")
 
     s = sub.add_parser("print", help="Print a file (PDF, text, image, ...) to a printer")
-    s.add_argument("file", type=Path, help="File to print")
+    s.add_argument("file", nargs="?", type=Path, default=None, help="File to print (omit for guided prompt)")
     s.add_argument("-p", "--printer", default=None, help="Printer name (default: system default)")
     s.add_argument("-n", "--copies", type=int, default=1, help="Number of copies (default: 1)")
     s.add_argument("-o", "--options", action="append", default=[],
@@ -450,6 +670,10 @@ def cmd_print(args) -> int:
     if args.copies < 1:
         eprint("error: --copies must be >= 1")
         return 2
+    if args.file is None:
+        # `print-cli print` with no file -> guide instead of cryptic error
+        eprint("no file given — launching guided mode.")
+        return cmd_wizard()
     if is_windows():
         if args.options:
             eprint("warning: -o/--options is CUPS-only; ignored on Windows.")
@@ -497,6 +721,16 @@ def cmd_default(args) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if not args.cmd:
+        # bare `print-cli` -> easiest path, not an error
+        return cmd_wizard(args)
+    if args.cmd == "wizard":
+        return cmd_wizard(args)
+    if args.cmd == "doctor":
+        return cmd_doctor(args)
+    if args.cmd == "setup":
+        eprint("running setup = doctor --fix")
+        return cmd_fix()
     if args.cmd in ("list", "printers"):
         return cmd_list(args)
     if args.cmd == "print":
