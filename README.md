@@ -89,6 +89,12 @@ print-cli list
 print-cli list --json
 
 # print anything (PDF, txt, md, png, jpg, ...) — no popup
+# NOTE: you must give the file's path — print-cli does NOT search for files.
+# Relative (document.pdf, docs/a.pdf), absolute (/home/you/docs/a.pdf),
+# and ~/... forms all work. Tab-completion works. Wizard accepts drag-drop
+# from the file manager (quotes are stripped) and re-prompts if not found.
+# Only know part of the name? Find it first (ls / find / file manager),
+# then paste the path.
 print-cli print document.pdf
 print-cli print document.pdf -p MyPrinter
 print-cli print notes.txt -p hp_smart_printing -n 2 --job-name "my-job"
